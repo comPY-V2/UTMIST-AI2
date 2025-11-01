@@ -30,6 +30,8 @@ class SubmittedAgent(Agent):
     '''
     Input the **file_path** to your agent here for submission!
     '''
+    file_path = "/home/eason/UTMIST-AI2/user/SB3Agent.py"
+    
     def __init__(
         self,
         file_path: Optional[str] = None,
@@ -74,4 +76,4 @@ class SubmittedAgent(Agent):
     # If modifying the number of models (or training in general), modify this
     def learn(self, env, total_timesteps, log_interval: int = 4):
         self.model.set_env(env)
-        self.model.learn(total_timesteps=total_timesteps, log_interval=log_interval)
+        self.model.learn(total_timesteps=total_timesteps, log_interval=log_interval)  
