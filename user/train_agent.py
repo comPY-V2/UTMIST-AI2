@@ -9,6 +9,17 @@ a) Start training from scratch
 b) Continue training from a specific timestep given an input `file_path`
 '''
 
+import os
+import sys
+
+
+CURRENT_DIR = os.path.dirname(__file__)
+REPO_ROOT = os.path.abspath(os.path.join(CURRENT_DIR))
+REPO_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, os.pardir))  # repo root (/home/eason/UTMIST-AI2)
+if REPO_ROOT not in sys.path:
+     sys.path.insert(0, REPO_ROOT)
+
+
 # -------------------------------------------------------------------
 # ----------------------------- IMPORTS -----------------------------
 # -------------------------------------------------------------------
@@ -542,22 +553,37 @@ def on_combo_reward(env: WarehouseBrawl, agent: str) -> float:
 Add your dictionary of RewardFunctions here using RewTerms
 '''
 def gen_reward_manager():
+    def _wrap(func, expected_scale: float = 1.0, clip: Optional[float] = None):
+        def _inner(env, *args, **kwargs):
+            v = float(func(env, *args, **kwargs))
+            v = v / expected_scale if expected_scale != 0 else v
+            if clip is not None:
+                v = max(min(v, clip), -clip)
+            return v
+        return _inner
+
+    
+    def proximity_shaping(env: WarehouseBrawl) -> float:
+        p = env.objects["player"].body.position
+        o = env.objects["opponent"].body.position
+        dist = abs(p.x - o.x)
+        return (env.objects["player"].prev_x - p.x) * (1.0 if p.x > o.x else -1.0)
+
     reward_functions = {
-        #'target_height_reward': RewTerm(func=base_height_l2, weight=0.0, params={'target_height': -4, 'obj_name': 'player'}),
-        'danger_zone_reward': RewTerm(func=danger_zone_reward, weight=0.5),
-        'damage_interaction_reward': RewTerm(func=damage_interaction_reward, weight=1.0),
-        #'head_to_middle_reward': RewTerm(func=head_to_middle_reward, weight=0.01),
-        #'head_to_opponent': RewTerm(func=head_to_opponent, weight=0.05),
-        'penalize_attack_reward': RewTerm(func=in_state_reward, weight=-0.04, params={'desired_state': AttackState}),
-        'holding_more_than_3_keys': RewTerm(func=holding_more_than_3_keys, weight=-0.01),
-        #'taunt_reward': RewTerm(func=in_state_reward, weight=0.2, params={'desired_state': TauntState}),
+        'danger_zone_reward': RewTerm(func=_wrap(danger_zone_reward, expected_scale=1.0, clip=1.0), weight=0.5),
+        'damage_interaction_reward': RewTerm(func=_wrap(damage_interaction_reward, expected_scale=1.0, clip=2.0), weight=2.0),
+        'penalize_attack_reward': RewTerm(func=_wrap(in_state_reward, expected_scale=1.0, clip=1.0), weight=-0.04, params={'desired_state': AttackState}),
+        'holding_more_than_3_keys': RewTerm(func=_wrap(holding_more_than_3_keys, expected_scale=1.0, clip=0.5), weight=-0.02),
+        'proximity_shaping': RewTerm(func=_wrap(proximity_shaping, expected_scale=1.0, clip=0.5), weight=0.02),
     }
+
+    # Terminal / event signals: reduce magnitudes to avoid destabilizing learning
     signal_subscriptions = {
-        'on_win_reward': ('win_signal', RewTerm(func=on_win_reward, weight=50)),
-        'on_knockout_reward': ('knockout_signal', RewTerm(func=on_knockout_reward, weight=8)),
-        'on_combo_reward': ('hit_during_stun', RewTerm(func=on_combo_reward, weight=5)),
-        'on_equip_reward': ('weapon_equip_signal', RewTerm(func=on_equip_reward, weight=10)),
-        'on_drop_reward': ('weapon_drop_signal', RewTerm(func=on_drop_reward, weight=15))
+        'on_win_reward': ('win_signal', RewTerm(func=_wrap(on_win_reward, expected_scale=1.0, clip=10.0), weight=8.0)),
+        'on_knockout_reward': ('knockout_signal', RewTerm(func=_wrap(on_knockout_reward, expected_scale=1.0, clip=5.0), weight=3.0)),
+        'on_combo_reward': ('hit_during_stun', RewTerm(func=_wrap(on_combo_reward, expected_scale=1.0, clip=3.0), weight=3.0)),
+        'on_equip_reward': ('weapon_equip_signal', RewTerm(func=_wrap(on_equip_reward, expected_scale=1.0, clip=5.0), weight=2.0)),
+        'on_drop_reward': ('weapon_drop_signal', RewTerm(func=_wrap(on_drop_reward, expected_scale=1.0, clip=5.0), weight=2.0))
     }
     return RewardManager(reward_functions, signal_subscriptions)
 
@@ -592,7 +618,7 @@ if __name__ == '__main__':
         max_saved=40, # Maximum number of saved models
         save_path='checkpoints', # Save path
         run_name='experiment_9',
-        mode=SaveHandlerMode.FORCE # Save mode, FORCE or RESUME
+        mode=SaveHandlerMode.RESUME# Save mode, FORCE or RESUME
     )
 
     # Set opponent settings here:
